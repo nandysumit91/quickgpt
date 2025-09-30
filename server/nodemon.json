@@ -1,0 +1,21 @@
+{
+  "watch": [
+    "server.js",
+    "controllers/",
+    "models/",
+    "routes/",
+    "configs/",
+    "middlewares/"
+  ],
+  "ext": "js",
+  "ignore": [
+    "node_modules/",
+    ".git/",
+    "*.log",
+    "package-lock.json",
+    ".env",
+    "nodemon.json"
+  ],
+  "delay": "2000ms",
+  "restartable": "rs"
+}
