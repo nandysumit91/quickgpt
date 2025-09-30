@@ -66,7 +66,6 @@ export const purchasePlan = async (req, res) => {
       return res.json({ success: false, message: "Invalid plan" });
     }
 
-    // Create new transaction with isPaid: false (pending)
     const transaction = await Transaction.create({
       userId: userId,
       planId: plan._id,
@@ -91,59 +90,15 @@ export const purchasePlan = async (req, res) => {
         },
       ],
       mode: "payment",
-      success_url: `${origin}/success`, // frontend route after payment
+      success_url: `${origin}/success`,
       cancel_url: `${origin}/cancel`,
       metadata: { transactionId: transaction._id.toString(), appId: "quickgpt" },
-      expires_at: Math.floor(Date.now() / 1000) + 30 * 60, // 30 min expiry
+      expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
     });
 
     res.json({ success: true, url: session.url });
   } catch (error) {
     console.error("Purchase Error:", error);
     res.json({ success: false, message: error.message });
-  }
-};
-
-// ================== Stripe Webhook ==================
-export const stripeWebhook = async (req, res) => {
-  try {
-    const sig = req.headers["stripe-signature"];
-    let event;
-
-    try {
-      event = stripe.webhooks.constructEvent(
-        req.rawBody, // make sure raw body middleware is used
-        sig,
-        process.env.STRIPE_WEBHOOK_SECRET
-      );
-    } catch (err) {
-      console.error("Webhook signature verification failed:", err.message);
-      return res.status(400).send(`Webhook Error: ${err.message}`);
-    }
-
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object;
-
-      const transactionId = session.metadata?.transactionId;
-      const transaction = await Transaction.findById(transactionId);
-
-      if (transaction && !transaction.isPaid) {
-        // ✅ mark transaction as paid
-        transaction.isPaid = true;
-        await transaction.save();
-
-        // ✅ add credits to user
-        const user = await User.findById(transaction.userId);
-        if (user) {
-          user.credits = (user.credits || 0) + transaction.credits;
-          await user.save();
-        }
-      }
-    }
-
-    res.json({ received: true });
-  } catch (error) {
-    console.error("Webhook Error:", error);
-    res.status(500).send("Internal Server Error");
   }
 };
