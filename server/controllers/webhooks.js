@@ -2,50 +2,70 @@ import Stripe from "stripe";
 import Transaction from "../models/Transaction.js";
 import User from "../models/User.js";
 
-export const stripeWebhooks = async (req, res) => {
+export const stripeWebhooks = async (request, response) => {
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-  const sig = req.headers["stripe-signature"];
+  const sig = request.headers["stripe-signature"]; // ✅ fixed spelling
 
   let event;
+
   try {
+    // request.body অবশ্যই raw buffer হতে হবে
     event = stripe.webhooks.constructEvent(
-      req.body, // must be raw body
+      request.body,
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
     );
   } catch (error) {
-    console.error("Webhook signature verification failed:", error.message);
-    return res.status(400).send(`Webhook Error: ${error.message}`);
+    return response.status(400).send(`Webhook Error: ${error.message}`);
   }
 
   try {
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object;
-      const { transactionId, appId } = session.metadata || {};
+    switch (event.type) {
+      // Checkout session success হলে এখানে আসবে
+      case "checkout.session.completed": {
+        const session = event.data.object;
 
-      if (appId === "quickgpt") {
-        const transaction = await Transaction.findById(transactionId);
-        if (!transaction || transaction.isPaid) {
-          console.warn("Transaction not found or already paid");
-          return res.status(404).send("Transaction not found");
+        const { transactionId, appId } = session.metadata || {};
+
+        if (appId === "quickgpt") {
+          const transaction = await Transaction.findOne({
+            _id: transactionId,
+            isPaid: false,
+          });
+
+          if (!transaction) {
+            console.log("⚠️ Transaction not found or already paid");
+            break;
+          }
+
+          // ✅ User credits update
+          await User.updateOne(
+            { _id: transaction.userId },
+            { $inc: { credits: transaction.credits } }
+          );
+
+          // ✅ Mark transaction as paid
+          transaction.isPaid = true;
+          await transaction.save();
+
+          console.log("✅ Transaction updated:", transactionId);
+        } else {
+          return response.json({
+            received: true,
+            message: "Ignored event: Invalid app",
+          });
         }
-
-        transaction.isPaid = true;
-        await transaction.save();
-
-        const user = await User.findById(transaction.userId);
-        if (user) {
-          user.credits = (user.credits || 0) + transaction.credits;
-          await user.save();
-        }
-
-        console.log("✅ Transaction completed & credits added:", transactionId);
+        break;
       }
+
+      default:
+        console.log("⚠️ Unhandled event type:", event.type);
+        break;
     }
 
-    res.json({ received: true });
+    response.json({ received: true });
   } catch (error) {
     console.error("Webhook processing error:", error);
-    res.status(500).send("Internal Server Error");
+    response.status(500).send("Internal Server Error");
   }
 };
